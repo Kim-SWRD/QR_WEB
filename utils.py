@@ -254,7 +254,7 @@ def process_data_to_qrs(raw_bytes):
     
     images = []
     for i, chunk in enumerate(chunks, 1):
-        # ★ 這裡加上順序標籤，讓機器讀得懂 (例如 "1/3|base64字串")
+        # ★ 這裡加上順序標籤，例如 "1/3|base64字串..." 讓網頁認得出來
         qr_text = f"{i}/{total}|{chunk}"
         
         M = make_qr(qr_text)
