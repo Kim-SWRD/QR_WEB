@@ -248,16 +248,16 @@ def create_qr_image_bytes(M, px=10, border=4, label=None):
     return out.getvalue()
 
 def process_data_to_qrs(raw_bytes):
-    """
-    接收二進位資料，依照 zlib 壓縮並進行 Base64 編碼，再切塊產生 QR Code[cite: 1]。
-    """
     b64 = base64.b64encode(zlib.compress(raw_bytes, 9)).decode()
     chunks = [b64[i:i+CHUNK] for i in range(0, len(b64), CHUNK)]
     total = len(chunks)
     
     images = []
     for i, chunk in enumerate(chunks, 1):
-        M = make_qr(chunk)
+        # ★ 這裡加上順序標籤，讓機器讀得懂 (例如 "1/3|base64字串")
+        qr_text = f"{i}/{total}|{chunk}"
+        
+        M = make_qr(qr_text)
         img_bytes = create_qr_image_bytes(M, px=10, border=4, label=f'{i}/{total}')
         images.append(img_bytes)
         
