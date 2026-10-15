@@ -4,15 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>QR Code 自動接收器</title>
-    <!-- 引入 QR Code 掃描庫 -->
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-    <!-- 引入 Zlib 解壓縮庫 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
     <style>
         body { font-family: sans-serif; text-align: center; margin: 0; padding: 10px; background: #f4f4f9; }
-        /* 增加 min-height 與白色背景，確保沒有影片時也有明確區塊 */
-        #reader { width: 100%; max-width: 400px; min-height: 300px; margin: 0 auto; background: #fff; border-radius: 10px; border: 2px dashed #ccc; overflow: hidden; }
+        #reader { width: 100%; max-width: 400px; min-height: 300px; margin: 0 auto; background: #fff; border-radius: 10px; overflow: hidden; }
         .progress-box { margin-top: 20px; font-size: 18px; font-weight: bold; }
+        .debug-box { margin-top: 10px; font-size: 14px; color: #666; background: #eee; padding: 5px; border-radius: 5px; }
         .chunk-grid { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; margin-top: 10px; }
         .chunk-box { width: 30px; height: 30px; line-height: 30px; background: #ccc; border-radius: 5px; color: white; font-size: 12px; }
         .chunk-box.active { background: #4CAF50; }
@@ -21,19 +19,18 @@
 </head>
 <body>
 
-    <h2>📱 QR Code 自動接收器</h2>
-    <p>請點擊下方按鈕啟動相機，系統會自動收集所有的 QR Code。</p>
+    <h2>📱 自動接收器</h2>
+    <p>請啟動相機，對準螢幕上的 QR Code。</p>
 
-    <!-- 掃描器畫面會顯示在這裡 -->
     <div id="reader"></div>
 
     <div class="progress-box">
-        收集進度: <span id="progress-text">0 / 0</span>
+        進度: <span id="progress-text">0 / 0</span>
     </div>
     
-    <!-- 顯示收集到的方塊 -->
+    <div class="debug-box" id="debug-text">等待掃描中...</div>
+    
     <div class="chunk-grid" id="chunk-grid"></div>
-
     <button id="download-btn" style="display: none;" onclick="downloadFile()">下載還原檔案</button>
 
     <script>
@@ -42,8 +39,9 @@
         let originalData = null;
         let html5QrcodeScanner;
 
-        // 掃描成功時的處理邏輯
         function onScanSuccess(decodedText, decodedResult) {
+            document.getElementById("debug-text").innerText = "最後掃描內容: " + decodedText.substring(0, 20) + "...";
+            
             const match = decodedText.match(/^(\d+)\/(\d+)\|(.*)$/);
             
             if (match) {
@@ -62,20 +60,21 @@
                     
                     const currentCount = Object.keys(collectedChunks).length;
                     document.getElementById("progress-text").innerText = `${currentCount} / ${totalChunks}`;
+                    document.getElementById("debug-text").innerText = `成功收集第 ${index + 1} 塊！`;
 
                     if (currentCount === totalChunks) {
-                        // 收集完畢後關閉掃描器並解壓縮
                         html5QrcodeScanner.clear().then(() => {
-                            document.getElementById("reader").innerHTML = "<h3 style='color:green; padding: 20px;'>✅ 所有資料收集完畢！正在解壓縮...</h3>";
+                            document.getElementById("reader").innerHTML = "<h3 style='color:green;'>✅ 收集完畢！解壓縮中...</h3>";
                             processData();
                         });
                     }
                 }
+            } else {
+                document.getElementById("debug-text").innerText += " (⚠️ 格式錯誤，可能掃到舊版的 QR Code)";
             }
         }
 
         function onScanFailure(error) {
-            // 忽略掃描失敗的 log
         }
 
         function initGrid(total) {
@@ -107,7 +106,11 @@
                 originalData = pako.inflate(bytes);
 
                 document.getElementById("download-btn").style.display = "inline-block";
-                document.getElementById("progress-text").innerText = "🎉 還原成功！請點擊下載。";
+                document.getElementById("progress-text").innerText = "🎉 還原成功！";
+                document.getElementById("debug-text").style.display = "none";
+                
+                // 自動觸發下載提示
+                downloadFile();
 
             } catch (err) {
                 alert("解壓縮失敗：" + err.message);
@@ -116,24 +119,27 @@
 
         function downloadFile() {
             if (!originalData) return;
+            
+            // 加入提示框，讓使用者自己輸入正確的副檔名
+            let defaultName = "restored_file.py";
+            let fileName = prompt("✅ 檔案還原成功！\n\n請輸入要儲存的檔案名稱與副檔名\n(例如: script.py, data.txt, app.apk)：", defaultName);
+            
+            if (!fileName) return; // 使用者按取消就不下載
+
             const blob = new Blob([originalData]);
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.style.display = "none";
             a.href = url;
-            a.download = "restored_file_from_qr.bin";
+            a.download = fileName;
             document.body.appendChild(a);
             a.click();
             window.URL.revokeObjectURL(url);
         }
 
-        // 使用 Html5QrcodeScanner 內建 UI 模式
-        // 這會自動生成一個「請求相機權限」的按鈕，通常能解決 iframe 阻擋自動播放影片的問題
         window.onload = function() {
             html5QrcodeScanner = new Html5QrcodeScanner(
-                "reader",
-                { fps: 10, qrbox: { width: 250, height: 250 } },
-                /* verbose= */ false
+                "reader", { fps: 15 }, false
             );
             html5QrcodeScanner.render(onScanSuccess, onScanFailure);
         };
