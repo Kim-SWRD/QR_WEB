@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <!-- 確保手機版面比例正確 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>QR Code 自動接收器</title>
+    <!-- 引入 QR Code 掃描庫 -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <!-- 引入 Zlib 解壓縮庫 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; margin: 0; padding: 10px; background: #f4f4f9; }
+        #reader { width: 100%; max-width: 400px; margin: 0 auto; border-radius: 10px; overflow: hidden; }
+        .progress-box { margin-top: 20px; font-size: 18px; font-weight: bold; }
+        .chunk-grid { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; margin-top: 10px; }
+        .chunk-box { width: 30px; height: 30px; line-height: 30px; background: #ccc; border-radius: 5px; color: white; font-size: 12px; }
+        .chunk-box.active { background: #4CAF50; }
+        button { padding: 10px 20px; font-size: 16px; margin-top: 20px; background: #007bff; color: white; border: none; border-radius: 5px; }
+    </style>
+</head>
+<body>
+
+    <h2>📱 QR Code 自動接收器</h2>
+    <p>請將鏡頭對準螢幕，系統會自動收集所有的 QR Code。</p>
+
+    <!-- 掃描器畫面會顯示在這裡 -->
+    <div id="reader"></div>
+
+    <div class="progress-box">
+        收集進度: <span id="progress-text">0 / 0</span>
+    </div>
+    
+    <!-- 顯示收集到的方塊 -->
+    <div class="chunk-grid" id="chunk-grid"></div>
+
+    <button id="download-btn" style="display: none;" onclick="downloadFile()">下載還原檔案</button>
+
+    <script>
+        let html5QrcodeScanner;
+        let totalChunks = 0;
+        let collectedChunks = {};
+        let originalData = null;
+
+        // 初始化掃描器
+        function startScanner() {
+            html5QrcodeScanner = new Html5Qrcode("reader");
+            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+            
+            // 預設使用手機後置鏡頭 (environment)
+            html5QrcodeScanner.start({ facingMode: "environment" }, config, onScanSuccess, onScanFailure)
+            .catch(err => alert("相機啟動失敗，請確保網頁使用 HTTPS 並允許相機權限。"));
+        }
+
+        // 掃描成功時的處理邏輯
+        function onScanSuccess(decodedText, decodedResult) {
+            // 嘗試解析格式： "1/5|SGVsbG8..."
+            const match = decodedText.match(/^(\d+)\/(\d+)\|(.*)$/);
+            
+            if (match) {
+                const index = parseInt(match[1]) - 1; // 陣列是 0-based
+                const total = parseInt(match[2]);
+                const base64Data = match[3];
+
+                // 如果是第一次掃描，初始化網格
+                if (totalChunks === 0) {
+                    totalChunks = total;
+                    initGrid(total);
+                }
+
+                // 如果這個區塊還沒收集過，存起來並更新 UI
+                if (!collectedChunks[index]) {
+                    collectedChunks[index] = base64Data;
+                    document.getElementById(`chunk-${index}`).classList.add("active");
+                    
+                    const currentCount = Object.keys(collectedChunks).length;
+                    document.getElementById("progress-text").innerText = `${currentCount} / ${totalChunks}`;
+
+                    // 檢查是否收集完畢
+                    if (currentCount === totalChunks) {
+                        html5QrcodeScanner.stop().then(() => {
+                            document.getElementById("reader").innerHTML = "<h3 style='color:green;'>✅ 所有資料收集完畢！正在解壓縮...</h3>";
+                            processData();
+                        });
+                    }
+                }
+            }
+        }
+
+        function onScanFailure(error) {
+            // 忽略掃描失敗（因為鏡頭會一直嘗試辨識）
+        }
+
+        // 初始化畫面上的小方塊
+        function initGrid(total) {
+            const grid = document.getElementById("chunk-grid");
+            grid.innerHTML = "";
+            for (let i = 0; i < total; i++) {
+                let box = document.createElement("div");
+                box.className = "chunk-box";
+                box.id = `chunk-${i}`;
+                box.innerText = i + 1;
+                grid.appendChild(box);
+            }
+        }
+
+        // 資料拼裝與解壓縮
+        function processData() {
+            try {
+                // 1. 依照順序拼接 Base64
+                let fullBase64 = "";
+                for (let i = 0; i < totalChunks; i++) {
+                    fullBase64 += collectedChunks[i];
+                }
+
+                // 2. Base64 轉為 Uint8Array
+                let binaryString = atob(fullBase64);
+                let len = binaryString.length;
+                let bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+
+                // 3. 用 Pako 進行 zlib 解壓縮
+                originalData = pako.inflate(bytes);
+
+                // 4. 顯示下載按鈕
+                document.getElementById("download-btn").style.display = "inline-block";
+                document.getElementById("progress-text").innerText = "🎉 還原成功！請點擊下載。";
+
+            } catch (err) {
+                alert("解壓縮失敗：" + err.message);
+            }
+        }
+
+        // 觸發檔案下載
+        function downloadFile() {
+            if (!originalData) return;
+            const blob = new Blob([originalData]);
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.style.display = "none";
+            a.href = url;
+            a.download = "restored_file_from_qr.bin"; // 預設檔名，可自行更改
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
+        // 啟動
+        window.onload = startScanner;
+    </script>
+</body>
+</html>
